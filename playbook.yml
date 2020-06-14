@@ -48,10 +48,11 @@
           block: |
             MASTER=bond0
             SLAVE=yes
-        notify:
-          - restart network
-          - restart network
-          - restart network
+
+      - name: restart network service
+        systemd:
+          name: network
+          state: restarted
 
       - name: enable forwarding
         lineinfile:
