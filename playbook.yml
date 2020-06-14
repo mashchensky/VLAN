@@ -1,0 +1,185 @@
+---
+    - hosts: all
+      become: yes
+      tasks:
+      - name: install packages
+        yum: name=wireshark state=latest 
+
+    - hosts: inetRouter
+      become: yes
+      vars:
+        - bond_ip: 192.168.255.5
+      tasks:
+
+      - name: install packages
+        yum: name=iptables-services state=latest
+
+      - name: copy iptables.rules
+        copy:
+          src: inetrouter.rules
+          dest: /etc/iptables.rules
+        notify:
+          - start iptables
+
+      - name: restore iptables rules
+        raw: "iptables-restore < /etc/iptables.rules && service iptables save"
+
+      - name: add route
+        lineinfile:
+          create: yes
+          line: "192.168.0.0/16 via 192.168.255.6 dev bond0"
+          path: /etc/sysconfig/network-scripts/route-bond0
+
+      - name: create bond0
+        template:
+          src: bond.j2
+          dest: /etc/sysconfig/network-scripts/ifcfg-bond0
+
+      - name: add eth1 to bond0
+        blockinfile:
+          path: /etc/sysconfig/network-scripts/ifcfg-eth1
+          block: |
+            MASTER=bond0
+            SLAVE=yes
+
+      - name: add eth2 to bond0
+        blockinfile:
+          path: /etc/sysconfig/network-scripts/ifcfg-eth2
+          block: |
+            MASTER=bond0
+            SLAVE=yes
+        notify:
+          - restart network
+          - restart network
+          - restart network
+
+      - name: enable forwarding
+        lineinfile:
+          create: yes
+          line: "net.ipv4.conf.all.forwarding=1"
+          path: /etc/sysctl.d/router.conf
+
+      handlers:
+      - name: restart network
+        systemd:
+          name: network
+          state: restarted
+
+      - name: start iptables
+        systemd:
+          name: iptables
+          state: restarted
+          enabled: yes
+
+    - hosts: centralRouter
+      become: yes
+      vars:
+        - bond_ip: 192.168.255.6
+      tasks:
+      - name: disable defaul eth0
+        lineinfile:
+          line: "DEFROUTE=no"
+          path: /etc/sysconfig/network-scripts/ifcfg-eth0
+
+      - name: add office1 route
+        lineinfile:
+          create: yes
+          line: "192.168.2.0/24 via 192.168.254.2 dev eth7"
+          path: /etc/sysconfig/network-scripts/route-eth7
+
+      - name: create bond0
+        template:
+          src: bond.j2
+          dest: /etc/sysconfig/network-scripts/ifcfg-bond0
+
+      - name: add eth1 to bond0
+        blockinfile:
+          path: /etc/sysconfig/network-scripts/ifcfg-eth1
+          block: |
+            MASTER=bond0
+            SLAVE=yes
+
+      - name: add eth2 to bond0
+        blockinfile:
+          path: /etc/sysconfig/network-scripts/ifcfg-eth2
+          block: |
+            MASTER=bond0
+            SLAVE=yes
+
+      - name: add gateway on eth1
+        lineinfile:
+          line: "GATEWAY=192.168.255.5"
+          path: /etc/sysconfig/network-scripts/ifcfg-bond0
+        notify:
+          - restart network
+          - restart network
+
+      - name: enable forwarding
+        lineinfile:
+          create: yes
+          line: "net.ipv4.conf.all.forwarding=1"
+          path: /etc/sysctl.d/router.conf
+
+      handlers:
+      - name: restart network
+        systemd:
+          name: network
+          state: restarted
+
+    - hosts: office1Router
+      become: yes
+      tasks:
+      - name: disable defaul eth0
+        lineinfile:
+          line: "DEFROUTE=no"
+          path: /etc/sysconfig/network-scripts/ifcfg-eth0
+
+      - name: add gateway on eth1
+        lineinfile:
+          line: "GATEWAY=192.168.254.1"
+          path: /etc/sysconfig/network-scripts/ifcfg-eth1
+        notify:
+          - restart network
+          - restart network
+
+      - name: enable forwarding
+        lineinfile:
+          create: yes
+          line: "net.ipv4.conf.all.forwarding=1"
+          path: /etc/sysctl.d/router.conf
+
+      handlers:
+      - name: restart network
+        systemd:
+          name: network
+          state: restarted
+
+    - hosts: testServer1, testServer2, testClient1, testClient2
+      become: yes
+      vars_files:
+        - "files/{{ ansible_hostname }}.yml"
+      tasks:
+      - name: disable defaul eth0
+        lineinfile:
+          line: "DEFROUTE=no"
+          path: /etc/sysconfig/network-scripts/ifcfg-eth0
+
+      - name: add vlan
+        template:
+          src: vlanX.j2
+          dest: /etc/sysconfig/network-scripts/ifcfg-vlan{{ vlan_id }}
+
+      - name: add gateway on eth1
+        lineinfile:
+          line: "GATEWAY=192.168.2.1"
+          path: /etc/sysconfig/network-scripts/ifcfg-eth1
+        notify:
+          - restart network
+          - restart network
+          - restart network
+
+      handlers:
+      - name: restart network
+        systemd:
+          name: network
+          state: restarted
